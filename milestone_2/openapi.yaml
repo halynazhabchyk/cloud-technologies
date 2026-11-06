@@ -1,0 +1,453 @@
+openapi: 3.0.3
+
+info:
+  title: Distributed Key-Value Store API
+  version: 1.0.0
+  description: >
+    REST API for managing table definitions and key-value records
+    in a distributed storage system. The coordinator exposes the API,
+    registers storage shards, and routes record operations to the
+    appropriate shard based on the record key.
+
+servers:
+  - url: http://localhost:8000
+    description: Local coordinator
+
+tags:
+  - name: Tables
+    description: Table definition management
+  - name: Records
+    description: Key-value record operations
+  - name: Shards
+    description: Storage shard registration and discovery
+
+paths:
+  /tables:
+    post:
+      tags:
+        - Tables
+      summary: Create a table definition
+      operationId: createTable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TableDefinition'
+            example:
+              tableName: users
+              partitionKey: userId
+      responses:
+        '201':
+          description: Table definition created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TableDefinition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: A table with this name already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+    get:
+      tags:
+        - Tables
+      summary: List table definitions
+      operationId: listTables
+      responses:
+        '200':
+          description: Registered table definitions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TableDefinition'
+
+  /tables/{tableName}:
+    parameters:
+      - $ref: '#/components/parameters/TableName'
+
+    get:
+      tags:
+        - Tables
+      summary: Get a table definition
+      operationId: getTable
+      responses:
+        '200':
+          description: Table definition retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TableDefinition'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tables/{tableName}/items/{partitionKey}:
+    parameters:
+      - $ref: '#/components/parameters/TableName'
+      - $ref: '#/components/parameters/PartitionKey'
+
+    put:
+      tags:
+        - Records
+      summary: Create or replace a record
+      operationId: putRecord
+      description: >
+        Creates a record or replaces the existing record identified by
+        its partition key and, when configured for the table, sort key.
+        The coordinator determines the responsible shard and forwards
+        the write operation to that shard. The sortKey parameter must
+        be provided when the table defines a sort key. The response
+        identifies the shard that accepted the write.
+      parameters:
+        - $ref: '#/components/parameters/SortKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Record'
+            example:
+              value:
+                name: Alex
+                email: alex@example.com
+      responses:
+        '201':
+          description: Record created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordWriteResponse'
+        '200':
+          description: Existing record replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordWriteResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: No available shard can handle the request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+
+    get:
+      tags:
+        - Records
+      summary: Read all records in a partition
+      operationId: listRecordsByPartition
+      description: >
+        Reads all records that share the partition key. The coordinator
+        identifies the responsible shard and retrieves the partition's
+        records from that shard. Each returned record includes its sortKey.
+        Returns an empty list when the table exists but the partition has
+        no records.
+      responses:
+        '200':
+          description: Records in the partition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartitionReadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: No available shard can handle the request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      tags:
+        - Records
+      summary: Delete a record
+      operationId: deleteRecord
+      description: >
+        Deletes a record identified by its partition key and, when
+        configured for the table, sort key. The coordinator routes
+        the operation to the responsible shard.
+      parameters:
+        - $ref: '#/components/parameters/SortKey'
+      responses:
+        '204':
+          description: Record deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: No available shard can handle the request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    head:
+      tags:
+        - Records
+      summary: Check whether a record exists
+      operationId: recordExists
+      description: >
+        Checks whether a record exists without returning its value.
+        Returns 200 when the record exists and 404 when the table
+        or record is not found. The sortKey parameter must be
+        provided when the table defines a sort key.
+      parameters:
+        - $ref: '#/components/parameters/SortKey'
+      responses:
+        '200':
+          description: Record exists
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: No available shard can handle the request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /shards:
+    post:
+      tags:
+        - Shards
+      summary: Register a storage shard
+      operationId: registerShard
+      description: >
+        Registers a storage node with the coordinator.
+        Each shard registers its identifier and internal base URL
+        when it starts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShardRegistration'
+            example:
+              shardId: shard-1
+              baseUrl: http://shard-1:8001
+      responses:
+        '201':
+          description: Shard registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Shard'
+        '409':
+          description: A shard with this identifier already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+    get:
+      tags:
+        - Shards
+      summary: List registered shards
+      operationId: listShards
+      responses:
+        '200':
+          description: Registered storage shards
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Shard'
+
+components:
+  parameters:
+    TableName:
+      name: tableName
+      in: path
+      required: true
+      description: Name of the registered table
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+
+    PartitionKey:
+      name: partitionKey
+      in: path
+      required: true
+      description: Value of the record's partition key
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 512
+
+    SortKey:
+      name: sortKey
+      in: query
+      required: false
+      description: >
+        Value of the sort key. Required when the table definition
+        specifies a sortKey; must be omitted otherwise.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 512
+
+  schemas:
+    TableDefinition:
+      type: object
+      required:
+        - tableName
+        - partitionKey
+      properties:
+        tableName:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Unique table name
+        partitionKey:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Attribute used as the partition key
+        sortKey:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >
+            Optional attribute used as a secondary key within
+            a partition. Its use is an extended feature.
+
+    Record:
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: object
+          additionalProperties: true
+          description: JSON object containing the record data
+
+    RecordWriteResponse:
+      type: object
+      required:
+        - value
+        - shardId
+      properties:
+        value:
+          type: object
+          additionalProperties: true
+          description: JSON object containing the written record data
+        shardId:
+          type: string
+          nullable: true
+          description: Shard that accepted the write, or null in single-node mode
+
+    PartitionRecord:
+      type: object
+      required:
+        - value
+      properties:
+        sortKey:
+          type: string
+          nullable: true
+          description: Sort key of the record, or null for tables without a sort key
+        value:
+          type: object
+          additionalProperties: true
+          description: JSON object containing the record data
+
+    PartitionReadResponse:
+      type: object
+      required:
+        - shardId
+        - records
+      properties:
+        shardId:
+          type: string
+          nullable: true
+          description: Shard that served the read, or null in single-node mode
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/PartitionRecord'
+
+    ShardRegistration:
+      type: object
+      required:
+        - shardId
+        - baseUrl
+      properties:
+        shardId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Unique identifier of the storage shard
+        baseUrl:
+          type: string
+          format: uri
+          description: Internal base URL used by the coordinator
+
+    Shard:
+      type: object
+      required:
+        - shardId
+        - baseUrl
+      properties:
+        shardId:
+          type: string
+        baseUrl:
+          type: string
+          format: uri
+
+    Error:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: Human-readable error description
+
+  responses:
+    BadRequest:
+      description: Invalid request or missing required key component
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Requested table or record not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    ValidationError:
+      description: Request body or parameters failed validation
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                oneOf:
+                  - type: string
+                  - type: array
+                    items:
+                      type: object

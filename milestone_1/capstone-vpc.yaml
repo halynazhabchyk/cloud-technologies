@@ -1,0 +1,186 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >
+  VPC network infrastructure for the Cloud Architectures capstone.
+  Creates a VPC with public and private subnets,
+  an Internet Gateway, and separate route tables.
+
+Resources:
+
+  # ---------------------------------------------------------
+  # VPC
+  # ---------------------------------------------------------
+
+  CapstoneVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+
+      Tags:
+        - Key: Name
+          Value: capstone-vpc
+
+
+  # ---------------------------------------------------------
+  # Internet Gateway
+  # ---------------------------------------------------------
+
+  CapstoneInternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+    Properties:
+      Tags:
+        - Key: Name
+          Value: capstone-igw
+
+
+  # Attach Internet Gateway to VPC
+
+  CapstoneInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+
+    Properties:
+      VpcId: !Ref CapstoneVPC
+      InternetGatewayId: !Ref CapstoneInternetGateway
+
+
+  # ---------------------------------------------------------
+  # Public Subnet
+  # ---------------------------------------------------------
+
+  CapstonePublicSubnet:
+    Type: AWS::EC2::Subnet
+
+    Properties:
+      VpcId: !Ref CapstoneVPC
+      CidrBlock: 10.0.1.0/24
+
+      MapPublicIpOnLaunch: true
+
+      Tags:
+        - Key: Name
+          Value: capstone-public-subnet
+
+
+  # ---------------------------------------------------------
+  # Private Subnet
+  # ---------------------------------------------------------
+
+  CapstonePrivateSubnet:
+    Type: AWS::EC2::Subnet
+
+    Properties:
+      VpcId: !Ref CapstoneVPC
+      CidrBlock: 10.0.2.0/24
+
+      MapPublicIpOnLaunch: false
+
+      Tags:
+        - Key: Name
+          Value: capstone-private-subnet
+
+
+  # ---------------------------------------------------------
+  # Public Route Table
+  # ---------------------------------------------------------
+
+  CapstonePublicRouteTable:
+    Type: AWS::EC2::RouteTable
+
+    Properties:
+      VpcId: !Ref CapstoneVPC
+
+      Tags:
+        - Key: Name
+          Value: capstone-public-rt
+
+
+  # Route from public subnet to Internet Gateway
+
+  CapstonePublicRoute:
+    Type: AWS::EC2::Route
+
+    DependsOn: CapstoneInternetGatewayAttachment
+
+    Properties:
+      RouteTableId: !Ref CapstonePublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref CapstoneInternetGateway
+
+
+  # Associate public subnet with public route table
+
+  CapstonePublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+
+    Properties:
+      SubnetId: !Ref CapstonePublicSubnet
+      RouteTableId: !Ref CapstonePublicRouteTable
+
+
+  # ---------------------------------------------------------
+  # Private Route Table
+  # ---------------------------------------------------------
+
+  CapstonePrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+
+    Properties:
+      VpcId: !Ref CapstoneVPC
+
+      Tags:
+        - Key: Name
+          Value: capstone-private-rt
+
+
+  # Associate private subnet with private route table
+
+  CapstonePrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+
+    Properties:
+      SubnetId: !Ref CapstonePrivateSubnet
+      RouteTableId: !Ref CapstonePrivateRouteTable
+
+
+# ---------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------
+
+Outputs:
+
+  VPCId:
+    Description: ID of the Capstone VPC
+    Value: !Ref CapstoneVPC
+
+
+  VPCCidr:
+    Description: CIDR block of the Capstone VPC
+    Value: 10.0.0.0/16
+
+
+  InternetGatewayId:
+    Description: ID of the Internet Gateway
+    Value: !Ref CapstoneInternetGateway
+
+
+  PublicSubnetId:
+    Description: ID of the public subnet
+    Value: !Ref CapstonePublicSubnet
+
+
+  PrivateSubnetId:
+    Description: ID of the private subnet
+    Value: !Ref CapstonePrivateSubnet
+
+
+  PublicRouteTableId:
+    Description: ID of the public route table
+    Value: !Ref CapstonePublicRouteTable
+
+
+  PrivateRouteTableId:
+    Description: ID of the private route table
+    Value: !Ref CapstonePrivateRouteTable

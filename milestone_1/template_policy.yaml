@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >
+  IAM role and policies for the Cloud Architectures capstone.
+  Creates a read-only role assumable by readonly-user-ownpolicy.
+
+Resources:
+
+  # Read-only policy
+  CapstoneReadOnlyPolicyIaC:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: CapstoneReadOnlyPolicyIaC
+      Description: Read-only access to selected AWS resources
+
+      PolicyDocument:
+        Version: "2012-10-17"
+
+        Statement:
+          - Effect: Allow
+            Action:
+              - account:GetAccountInformation
+              - appstream:Get*
+              - appstream:Describe*
+              - appstream:List*
+              - autoscaling:Describe*
+              - cloudformation:Describe*
+              - cloudformation:Get*
+              - cloudformation:List*
+              - cloudwatch:Describe*
+              - cloudwatch:Get*
+              - cloudwatch:List*
+              - dynamodb:Get*
+              - dynamodb:BatchGetItem
+              - dynamodb:Query
+              - dynamodb:Scan
+              - ec2:Describe*
+              - elasticloadbalancing:Describe*
+              - iam:Get*
+              - iam:List*
+              - rds:Describe*
+              - rds:List*
+              - s3:Get*
+              - s3:List*
+            Resource: "*"
+
+
+  # Read-only IAM role
+  CapstoneReadOnlyRoleIaC:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CapstoneReadOnlyRoleIaC
+      Description: Read-only role for the capstone project
+
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+
+        Statement:
+          - Sid: AllowReadonlyUserToAssumeRole
+            Effect: Allow
+
+            Principal:
+              AWS: arn:aws:iam::026249143621:user/readonly-user-ownpolicy
+
+            Action:
+              - sts:AssumeRole
+
+      ManagedPolicyArns:
+        - !Ref CapstoneReadOnlyPolicyIaC
+
+
+  # Policy that allows readonly-user-ownpolicy
+  # to assume CapstoneReadOnlyRoleIaC
+  CapstoneAssumeReadOnlyRolePolicyIaC:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: CapstoneAssumeReadOnlyRolePolicyIaC
+      Description: Allow readonly-user-ownpolicy to assume the read-only role
+
+      Users:
+        - readonly-user-ownpolicy
+
+      PolicyDocument:
+        Version: "2012-10-17"
+
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+
+            Resource:
+              - !GetAtt CapstoneReadOnlyRoleIaC.Arn
+
+
+Outputs:
+
+  ReadOnlyRoleArn:
+    Description: ARN of the created read-only role
+    Value: !GetAtt CapstoneReadOnlyRoleIaC.Arn
+
+
+  ReadOnlyPolicyArn:
+    Description: ARN of the read-only policy
+    Value: !GetAtt CapstoneReadOnlyPolicyIaC.PolicyArn
+
+
+  AssumeRolePolicyArn:
+    Description: ARN of the policy attached to readonly-user-ownpolicy
+    Value: !GetAtt CapstoneAssumeReadOnlyRolePolicyIaC.PolicyArn

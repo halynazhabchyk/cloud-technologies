@@ -1,0 +1,54 @@
+services:
+  coordinator:
+    build:
+      context: ./coordinator
+    environment:
+      SHARDING_ENABLED: "true"
+    ports:
+      - "8000:8000"
+    networks:
+      - kv-network
+
+  shard1:
+    build:
+      context: ./shard
+    environment:
+      SHARD_ID: shard-1
+      SHARD_URL: http://shard1:8000
+      COORDINATOR_URL: http://coordinator:8000
+    ports:
+      - "8001:8000"
+    depends_on:
+      - coordinator
+    networks:
+      - kv-network
+
+  shard2:
+    build:
+      context: ./shard
+    environment:
+      SHARD_ID: shard-2
+      SHARD_URL: http://shard2:8000
+      COORDINATOR_URL: http://coordinator:8000
+    ports:
+      - "8002:8000"
+    depends_on:
+      - coordinator
+    networks:
+      - kv-network
+
+  coordinator-single:
+    build:
+      context: ./coordinator
+    profiles:
+      - single-node
+    environment:
+      SHARDING_ENABLED: "false"
+    ports:
+      - "8010:8000"
+    networks:
+      - kv-network
+
+networks:
+  kv-network:
+    driver: bridge
