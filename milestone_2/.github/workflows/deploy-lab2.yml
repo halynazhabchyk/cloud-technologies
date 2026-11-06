@@ -6,9 +6,9 @@ on:
       - "milestone_2/**"
       - ".github/workflows/deploy-lab2.yml"
   workflow_dispatch:
+
 permissions:
   contents: read
-  id-token: write
 concurrency:
   group: deploy-lab2
   cancel-in-progress: false
@@ -47,12 +47,10 @@ jobs:
         run: python -c "import coordinator.app.main; print('coordinator OK')"
 
       - name: Check shard module imports
-        # Шард збирається з контексту ./shard (див. shard/Dockerfile), тому пакет називається app.
         working-directory: milestone_2/shard
         run: python -c "import app.main; print('shard OK')"
 
       - name: Compare hashing methods
-        # Скрипт порівняння методів хешування запускаємо лише за його наявності.
         run: |
           if [ -f coordinator/app/sharding/measure_resharding.py ]; then
             python -m coordinator.app.sharding.measure_resharding --keys 10000
@@ -71,10 +69,11 @@ jobs:
       EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
 
     steps:
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Send deploy command through SSM
