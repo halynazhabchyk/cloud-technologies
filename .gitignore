@@ -1,0 +1,5 @@
+docs/
+~$*
+desktop.ini
+__pycache__/
+.venv/
