@@ -1,4 +1,4 @@
-# Distributed Key-Value Store — Milestone 3 (Replication)
+# Distributed Key-Value Store (milestones 3–4)
 
 Distributed key-value store: a FastAPI coordinator routes records to shards by consistent hashing, and every shard is a replica set of three nodes, one leader and two followers, kept in sync through an append-only replication log in Apache Kafka (one single-partition topic per shard). The client API is specified in `openapi.yaml`.
 
@@ -189,7 +189,7 @@ python -m pytest -q
 - `test_replication.py` covers the log, the leader/follower flow, follower restart from its offset, and the write quorum;
 - `test_replicated_flow.py` covers read spreading, stale reads vs quorum reads, and failover.
 
-CI for this folder is `.github/workflows/ci-lab3.yml`. It also starts the full cluster with Docker Compose and checks that all 6 replicas register and that a write reaches every replica.
+CI for this folder is `.github/workflows/ci.yml`. It also starts the full cluster with Docker Compose and checks that all 6 replicas register and that a write reaches every replica.
 
 For a single-node local coordinator:
 

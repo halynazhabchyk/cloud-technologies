@@ -12,7 +12,7 @@ def create_app(settings: CoordinatorSettings | None = None) -> FastAPI:
     settings = settings or load_settings()
     app = FastAPI(
         title="Distributed Key-Value Store",
-        description="Milestone 3 key-value store coordinator: sharding + replication",
+        description="Key-value store coordinator: sharding + replication",
         version="1.0.0",
     )
     app.state.coordinator = Coordinator(LocalStorage(), ShardRegistry(), settings)

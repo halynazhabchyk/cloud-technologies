@@ -1,14 +1,14 @@
-name: CI lab 3
+name: CI kv-store
 on:
   push:
-    branches: [lab3-replication]
+    branches: [main, lab3-replication, lab4-monitoring]
     paths:
-      - "milestone_3/**"
-      - ".github/workflows/ci-lab3.yml"
+      - "kv-store/**"
+      - ".github/workflows/ci.yml"
   pull_request:
     paths:
-      - "milestone_3/**"
-      - ".github/workflows/ci-lab3.yml"
+      - "kv-store/**"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 permissions:
@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: milestone_3
+        working-directory: kv-store
 
     steps:
       - name: Checkout
@@ -32,9 +32,9 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: |
-            milestone_3/requirements-dev.txt
-            milestone_3/coordinator/requirements.txt
-            milestone_3/shard/requirements.txt
+            kv-store/requirements-dev.txt
+            kv-store/coordinator/requirements.txt
+            kv-store/shard/requirements.txt
 
       - name: Install dependencies
         run: |
