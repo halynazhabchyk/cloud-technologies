@@ -1,12 +1,13 @@
 import httpx
 import pytest
 
+from coordinator.app.core.config import CoordinatorSettings
 from coordinator.app.services.coordinator import (
     Coordinator,
     ShardUnavailableError,
 )
 from coordinator.app.sharding.consistent_hashing import ConsistentHashRing
-from coordinator.app.sharding.measure_resharding import measure
+from coordinator.app.sharding.measure_resharding import measure, measure_modulo
 from coordinator.app.sharding.shard_registry import (
     NoAvailableShardsError,
     ShardRegistry,
@@ -32,6 +33,15 @@ def test_resharding_reports_changed_assignments() -> None:
     assert before == {"shard-1": 5106, "shard-2": 4894, "shard-3": 0}
     assert after == {"shard-1": 3377, "shard-2": 2963, "shard-3": 3660}
     assert moved == 3660
+
+
+def test_consistent_hashing_moves_far_fewer_keys_than_modulo() -> None:
+    _, after, modulo_moved = measure_modulo(10_000)
+    _, _, ring_moved = measure(10_000)
+
+    assert sum(after.values()) == 10_000
+    assert modulo_moved > 6_000  # ~2/3 of keys for hash % N
+    assert ring_moved < 4_500  # close to the 1/3 minimum
 
 
 def test_registry_requires_two_shards_and_routes_after_registration() -> None:
@@ -70,11 +80,11 @@ def test_coordinator_rejects_malformed_shard_response(
     coordinator = Coordinator(
         LocalStorage(),
         shard_registry=registry,
-        sharding_enabled=True,
+        settings=CoordinatorSettings(sharding_enabled=True),
     )
     coordinator.create_table("events", "userId")
     monkeypatch.setattr(
-        "coordinator.app.services.coordinator.httpx.Client",
+        "coordinator.app.services.shard_client.httpx.Client",
         lambda **_kwargs: FakeClient(),
     )
 

@@ -7,7 +7,13 @@ class ShardStorage(ABC):
     """Storage contract implemented by a shard-local record store."""
 
     @abstractmethod
-    def put(self, table_name: str, key: RecordKey, value: RecordValue) -> bool:
+    def put(
+        self,
+        table_name: str,
+        key: RecordKey,
+        value: RecordValue,
+        version: int | None = None,
+    ) -> bool:
         """Create or replace a record and report whether it was created."""
         ...
 

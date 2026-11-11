@@ -1,26 +1,23 @@
-from dataclasses import dataclass
+"""Coordinator business logic: tables, key validation and record operations.
+
+In single-node mode records live in the coordinator's own storage; with
+sharding enabled they are routed to shard replicas through ``ShardClient``.
+"""
+
 from typing import Any
-from urllib.parse import quote
 
-import httpx
-
-from coordinator.app.sharding.shard_registry import (
-    NoAvailableShardsError,
-    ShardRegistry,
+from coordinator.app.core.config import CoordinatorSettings
+from coordinator.app.services.errors import InvalidRequestError
+from coordinator.app.services.shard_client import (
+    ShardClient,
+    ShardUnavailableError,
+    read_json_object,
+    read_records,
 )
+from coordinator.app.sharding.shard_registry import ShardRegistry
 from coordinator.app.storage.storage import RecordKey, RecordValue, Storage
 
-SHARD_UNAVAILABLE_DETAIL = "No available shard can handle the request"
-
-
-class ShardUnavailableError(RuntimeError):
-    pass
-
-
-@dataclass(frozen=True)
-class ShardResponse:
-    shard_id: str
-    response: httpx.Response
+__all__ = ["Coordinator", "InvalidRequestError", "ShardUnavailableError"]
 
 
 class Coordinator:
@@ -28,84 +25,29 @@ class Coordinator:
         self,
         storage: Storage,
         shard_registry: ShardRegistry | None = None,
-        sharding_enabled: bool = False,
-        request_timeout: float = 3.0,
+        settings: CoordinatorSettings | None = None,
     ):
         self.storage = storage
+        self.settings = settings or CoordinatorSettings()
         self.shard_registry = shard_registry or ShardRegistry()
-        self.sharding_enabled = sharding_enabled
-        self.request_timeout = request_timeout
+        self.shards = ShardClient(self.shard_registry, self.settings)
 
-    def _request_shard(
-        self,
-        method: str,
-        table_name: str,
-        key: RecordKey,
-        value: RecordValue | None = None,
-    ) -> ShardResponse:
-        try:
-            shard = self.shard_registry.select_shard(key.partition_key)
-        except NoAvailableShardsError as error:
-            raise ShardUnavailableError(SHARD_UNAVAILABLE_DETAIL) from error
+    @property
+    def sharding_enabled(self) -> bool:
+        return self.settings.sharding_enabled
 
-        table_segment = quote(table_name, safe="")
-        url = f"{shard['baseUrl']}/internal/tables/{table_segment}/records"
-        params = {"partitionKey": key.partition_key}
-        if key.sort_key is not None:
-            params["sortKey"] = key.sort_key
+    def replication_summary(self) -> dict[str, Any]:
+        settings = self.settings
+        return {
+            "replicationFactor": settings.replication_factor,
+            "writeQuorum": settings.write_quorum,
+            "readQuorum": settings.read_quorum,
+            # R + W > N: every read quorum shares a replica with the write quorum.
+            "strongConsistency": settings.read_quorum + settings.write_quorum
+            > settings.replication_factor,
+        }
 
-        try:
-            with httpx.Client(timeout=self.request_timeout) as client:
-                response = client.request(
-                    method,
-                    url,
-                    params=params,
-                    json={"value": value} if method == "PUT" else None,
-                )
-        except httpx.RequestError as error:
-            raise ShardUnavailableError(SHARD_UNAVAILABLE_DETAIL) from error
-
-        if response.status_code >= 500:
-            raise ShardUnavailableError(SHARD_UNAVAILABLE_DETAIL)
-        return ShardResponse(shard_id=shard["shardId"], response=response)
-
-    @staticmethod
-    def _read_shard_payload(response: httpx.Response) -> Any:
-        try:
-            return response.json()
-        except (TypeError, ValueError) as error:
-            raise ShardUnavailableError(SHARD_UNAVAILABLE_DETAIL) from error
-
-    @classmethod
-    def _read_shard_json(cls, response: httpx.Response) -> dict[str, Any]:
-        payload = cls._read_shard_payload(response)
-        if not isinstance(payload, dict):
-            raise ShardUnavailableError(SHARD_UNAVAILABLE_DETAIL)
-
-        return payload
-
-    @classmethod
-    def _read_shard_records(
-        cls,
-        response: httpx.Response,
-    ) -> list[dict[str, Any]]:
-        payload = cls._read_shard_payload(response)
-        if not isinstance(payload, list):
-            raise ShardUnavailableError(SHARD_UNAVAILABLE_DETAIL)
-
-        for record in payload:
-            if (
-                not isinstance(record, dict)
-                or not isinstance(record.get("value"), dict)
-                or "sortKey" not in record
-                or (
-                    record["sortKey"] is not None
-                    and not isinstance(record["sortKey"], str)
-                )
-            ):
-                raise ShardUnavailableError(SHARD_UNAVAILABLE_DETAIL)
-
-        return payload
+    # --- tables -----------------------------------------------------------
 
     def create_table(
         self,
@@ -114,13 +56,11 @@ class Coordinator:
         sort_key: str | None = None,
     ) -> dict[str, Any]:
         if not table_name.strip():
-            raise ValueError("Table name cannot be empty")
-
+            raise InvalidRequestError("Table name cannot be empty")
         if not partition_key.strip():
-            raise ValueError("Partition key cannot be empty")
-
+            raise InvalidRequestError("Partition key cannot be empty")
         if sort_key is not None and not sort_key.strip():
-            raise ValueError("Sort key cannot be empty")
+            raise InvalidRequestError("Sort key cannot be empty")
 
         return self.storage.create_table(
             table_name=table_name,
@@ -134,52 +74,82 @@ class Coordinator:
     def get_table(self, table_name: str) -> dict[str, Any]:
         return self.storage.get_table(table_name)
 
-    def _validate_record_key(
-        self,
-        table_name: str,
-        key: RecordKey,
-    ) -> None:
+    def _validate_record_key(self, table_name: str, key: RecordKey) -> None:
         table = self.storage.get_table(table_name)
         sort_key_name = table.get("sortKey")
 
         if not key.partition_key.strip():
-            raise ValueError("Partition key value cannot be empty")
-
+            raise InvalidRequestError("Partition key value cannot be empty")
         if sort_key_name is not None and key.sort_key is None:
-            raise ValueError("Sort key value is required")
-
+            raise InvalidRequestError("Sort key value is required")
         if sort_key_name is None and key.sort_key is not None:
-            raise ValueError("This table does not use a sort key")
-
+            raise InvalidRequestError("This table does not use a sort key")
         if key.sort_key is not None and not key.sort_key.strip():
-            raise ValueError("Sort key value cannot be empty")
+            raise InvalidRequestError("Sort key value cannot be empty")
+
+    # --- records ----------------------------------------------------------
 
     def create_record(
         self,
         table_name: str,
         key: RecordKey,
         value: RecordValue,
-    ) -> tuple[bool, str | None]:
+    ) -> tuple[bool, str | None, int | None]:
+        """Write a record; return (created, shardId, version)."""
         self._validate_record_key(table_name, key)
 
-        if self.sharding_enabled:
-            shard_response = self._request_shard("PUT", table_name, key, value)
-            response = shard_response.response
-            if response.status_code not in (200, 201):
-                raise ShardUnavailableError(SHARD_UNAVAILABLE_DETAIL)
+        if not self.sharding_enabled:
+            created = self.storage.put_record(
+                table_name=table_name, key=key, value=value
+            )
+            return created, None, None
 
-            payload = self._read_shard_json(response)
-            created = payload.get("created")
-            if not isinstance(created, bool):
-                raise ShardUnavailableError(SHARD_UNAVAILABLE_DETAIL)
-            return created, shard_response.shard_id
+        shard_response = self.shards.write("PUT", table_name, key, value)
+        if shard_response.response.status_code not in (200, 201):
+            raise ShardUnavailableError()
 
-        created = self.storage.put_record(
-            table_name=table_name,
-            key=key,
-            value=value,
-        )
-        return created, None
+        payload = read_json_object(shard_response.response)
+        created = payload.get("created")
+        version = payload.get("version")
+        if not isinstance(created, bool):
+            raise ShardUnavailableError()
+        if version is not None and not isinstance(version, int):
+            raise ShardUnavailableError()
+        return created, shard_response.shard_id, version
+
+    def read_record(self, table_name: str, key: RecordKey) -> dict[str, Any] | None:
+        """Read one record by its full key; return None when it is missing."""
+        self._validate_record_key(table_name, key)
+
+        if not self.sharding_enabled:
+            value = self.storage.get_record(table_name=table_name, key=key)
+            if value is None:
+                return None
+            return {
+                "shardId": None,
+                "replicaId": None,
+                "sortKey": key.sort_key,
+                "value": value,
+                "version": None,
+            }
+
+        shard_response = self.shards.read("GET", table_name, key, resource="record")
+        response = shard_response.response
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            raise ShardUnavailableError()
+
+        payload = read_json_object(response)
+        if not isinstance(payload.get("value"), dict):
+            raise ShardUnavailableError()
+        return {
+            "shardId": shard_response.shard_id,
+            "replicaId": shard_response.replica_id,
+            "sortKey": key.sort_key,
+            "value": payload["value"],
+            "version": payload.get("version"),
+        }
 
     def read_records_by_partition(
         self,
@@ -188,72 +158,61 @@ class Coordinator:
     ) -> dict[str, Any]:
         self.storage.get_table(table_name)
         if not partition_key.strip():
-            raise ValueError("Partition key value cannot be empty")
+            raise InvalidRequestError("Partition key value cannot be empty")
 
-        if self.sharding_enabled:
-            shard_response = self._request_shard(
-                "GET",
-                table_name,
-                RecordKey(partition_key=partition_key),
-            )
-            response = shard_response.response
-            if response.status_code == 404:
-                raise ShardUnavailableError(SHARD_UNAVAILABLE_DETAIL)
-            if response.status_code != 200:
-                raise ShardUnavailableError(SHARD_UNAVAILABLE_DETAIL)
+        if not self.sharding_enabled:
             return {
-                "shardId": shard_response.shard_id,
-                "records": self._read_shard_records(response),
+                "shardId": None,
+                "replicaId": None,
+                "records": self.storage.list_records_by_partition(
+                    table_name=table_name,
+                    partition_key=partition_key,
+                ),
             }
 
+        shard_response = self.shards.read(
+            "GET",
+            table_name,
+            RecordKey(partition_key=partition_key),
+            resource="records",
+        )
+        if shard_response.response.status_code != 200:
+            raise ShardUnavailableError()
         return {
-            "shardId": None,
-            "records": self.storage.list_records_by_partition(
-                table_name=table_name,
-                partition_key=partition_key,
-            ),
+            "shardId": shard_response.shard_id,
+            "replicaId": shard_response.replica_id,
+            "records": read_records(shard_response.response),
         }
 
-    def delete_record(
-        self,
-        table_name: str,
-        key: RecordKey,
-    ) -> bool:
+    def delete_record(self, table_name: str, key: RecordKey) -> bool:
         self._validate_record_key(table_name, key)
 
-        if self.sharding_enabled:
-            response = self._request_shard("DELETE", table_name, key).response
-            if response.status_code == 404:
-                return False
-            if response.status_code == 204:
-                return True
-            if response.status_code == 200:
-                payload = self._read_shard_json(response)
-                if payload.get("deleted") is True:
-                    return True
-            raise ShardUnavailableError(SHARD_UNAVAILABLE_DETAIL)
+        if not self.sharding_enabled:
+            return self.storage.delete_record(table_name=table_name, key=key)
 
-        return self.storage.delete_record(
-            table_name=table_name,
-            key=key,
-        )
-
-    def record_exists(
-        self,
-        table_name: str,
-        key: RecordKey,
-    ) -> bool:
-        self._validate_record_key(table_name, key)
-
-        if self.sharding_enabled:
-            response = self._request_shard("HEAD", table_name, key).response
-            if response.status_code == 404:
-                return False
-            if response.status_code != 200:
-                raise ShardUnavailableError(SHARD_UNAVAILABLE_DETAIL)
+        response = self.shards.write("DELETE", table_name, key).response
+        if response.status_code == 404:
+            return False
+        if response.status_code == 204:
             return True
+        if (
+            response.status_code == 200
+            and read_json_object(response).get("deleted") is True
+        ):
+            return True
+        raise ShardUnavailableError()
 
-        return self.storage.record_exists(
-            table_name=table_name,
-            key=key,
-        )
+    def record_exists(self, table_name: str, key: RecordKey) -> bool:
+        self._validate_record_key(table_name, key)
+
+        if not self.sharding_enabled:
+            return self.storage.record_exists(table_name=table_name, key=key)
+
+        response = self.shards.read(
+            "HEAD", table_name, key, resource="records"
+        ).response
+        if response.status_code == 404:
+            return False
+        if response.status_code != 200:
+            raise ShardUnavailableError()
+        return True

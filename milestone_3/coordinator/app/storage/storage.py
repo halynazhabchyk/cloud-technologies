@@ -50,6 +50,11 @@ class Storage(ABC):
         ...
 
     @abstractmethod
+    def get_record(self, table_name: str, key: RecordKey) -> RecordValue | None:
+        """Return one record value or None when it does not exist."""
+        ...
+
+    @abstractmethod
     def list_records_by_partition(
         self,
         table_name: str,

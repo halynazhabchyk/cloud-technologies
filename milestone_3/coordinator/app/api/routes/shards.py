@@ -16,6 +16,8 @@ def register_shard(
         created = coordinator.shard_registry.register(
             registration.shard_id,
             str(registration.base_url),
+            replica_id=registration.replica_id,
+            role=registration.role,
         )
     except ValueError as error:
         raise HTTPException(
@@ -26,11 +28,13 @@ def register_shard(
     if not created:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A shard with this identifier already exists",
+            detail="A replica with this identifier already exists",
         )
 
     return {
         "shardId": registration.shard_id,
+        "replicaId": registration.replica_id or registration.shard_id,
+        "role": registration.role,
         "baseUrl": str(registration.base_url).rstrip("/"),
     }
 

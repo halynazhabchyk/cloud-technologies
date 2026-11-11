@@ -1,33 +1,28 @@
 from fastapi import FastAPI
 
-from coordinator.app.api.routes import records, shards, tables
-from coordinator.app.core.config import REQUEST_TIMEOUT, SHARDING_ENABLED
+from coordinator.app.api.errors import register_error_handlers
+from coordinator.app.api.routes import health, records, shards, tables
+from coordinator.app.core.config import CoordinatorSettings, load_settings
 from coordinator.app.services.coordinator import Coordinator
 from coordinator.app.sharding.shard_registry import ShardRegistry
 from coordinator.app.storage.local_storage import LocalStorage
 
 
-def create_app() -> FastAPI:
+def create_app(settings: CoordinatorSettings | None = None) -> FastAPI:
+    settings = settings or load_settings()
     app = FastAPI(
         title="Distributed Key-Value Store",
-        description="Coordinator API for the Milestone 3 key-value store",
+        description="Milestone 3 key-value store coordinator: sharding + replication",
         version="1.0.0",
     )
-    app.state.coordinator = Coordinator(
-        LocalStorage(),
-        shard_registry=ShardRegistry(),
-        sharding_enabled=SHARDING_ENABLED,
-        request_timeout=REQUEST_TIMEOUT,
-    )
+    app.state.coordinator = Coordinator(LocalStorage(), ShardRegistry(), settings)
 
+    register_error_handlers(app)
+    app.include_router(health.router)
     app.include_router(tables.router)
     app.include_router(records.router)
-    if SHARDING_ENABLED:
+    if settings.sharding_enabled:
         app.include_router(shards.router)
-
-    @app.get("/", tags=["Health"])
-    def health_check():
-        return {"message": "Coordinator is running"}
 
     return app
 

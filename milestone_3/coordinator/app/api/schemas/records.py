@@ -9,13 +9,22 @@ class Record(BaseModel):
 
 class RecordWriteResponse(Record):
     shard_id: str | None = Field(alias="shardId")
+    # Offset of the write in the shard's replication log (null in single-node).
+    version: int | None = None
 
 
 class PartitionRecord(BaseModel):
     sort_key: str | None = Field(default=None, alias="sortKey")
     value: dict[str, Any]
+    version: int | None = None
+
+
+class RecordReadResponse(PartitionRecord):
+    shard_id: str | None = Field(alias="shardId")
+    replica_id: str | None = Field(default=None, alias="replicaId")
 
 
 class PartitionReadResponse(BaseModel):
     shard_id: str | None = Field(alias="shardId")
+    replica_id: str | None = Field(default=None, alias="replicaId")
     records: list[PartitionRecord]

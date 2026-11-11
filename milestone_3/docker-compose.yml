@@ -1,41 +1,149 @@
+x-replica: &replica
+  build:
+    context: ./shard
+  restart: unless-stopped
+  depends_on:
+    coordinator:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+  networks:
+    - kv-network
+
+x-replica-env: &replica-env
+  COORDINATOR_URL: http://coordinator:8000
+  DATA_DIR: /data
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS-kafka:9092}
+
 services:
+  kafka:
+    image: apache/kafka:3.8.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+    networks:
+      - kv-network
+
   coordinator:
     build:
       context: ./coordinator
     environment:
       SHARDING_ENABLED: "true"
+      REPLICATION_FACTOR: ${REPLICATION_FACTOR:-3}
+      WRITE_QUORUM: ${WRITE_QUORUM:-2}
+      READ_QUORUM: ${READ_QUORUM:-2}
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
     networks:
       - kv-network
 
-  shard1:
-    build:
-      context: ./shard
+  # ---- shard-1 ------------------------------------------------------------
+  shard1-a:
+    <<: *replica
     environment:
+      <<: *replica-env
       SHARD_ID: shard-1
-      SHARD_URL: http://shard1:8000
-      COORDINATOR_URL: http://coordinator:8000
+      REPLICA_ID: shard-1-a
+      REPLICA_ROLE: leader
+      SHARD_URL: http://shard1-a:8000
     ports:
-      - "8001:8000"
-    depends_on:
-      - coordinator
-    networks:
-      - kv-network
+      - "8011:8000"
+    volumes:
+      - shard1-a-data:/data
 
-  shard2:
-    build:
-      context: ./shard
+  shard1-b:
+    <<: *replica
     environment:
-      SHARD_ID: shard-2
-      SHARD_URL: http://shard2:8000
-      COORDINATOR_URL: http://coordinator:8000
+      <<: *replica-env
+      SHARD_ID: shard-1
+      REPLICA_ID: shard-1-b
+      REPLICA_ROLE: follower
+      SHARD_URL: http://shard1-b:8000
+      LEADER_URL: http://shard1-a:8000
     ports:
-      - "8002:8000"
-    depends_on:
-      - coordinator
-    networks:
-      - kv-network
+      - "8012:8000"
+    volumes:
+      - shard1-b-data:/data
+
+  shard1-c:
+    <<: *replica
+    environment:
+      <<: *replica-env
+      SHARD_ID: shard-1
+      REPLICA_ID: shard-1-c
+      REPLICA_ROLE: follower
+      SHARD_URL: http://shard1-c:8000
+      LEADER_URL: http://shard1-a:8000
+    ports:
+      - "8013:8000"
+    volumes:
+      - shard1-c-data:/data
+
+  # ---- shard-2 ------------------------------------------------------------
+  shard2-a:
+    <<: *replica
+    environment:
+      <<: *replica-env
+      SHARD_ID: shard-2
+      REPLICA_ID: shard-2-a
+      REPLICA_ROLE: leader
+      SHARD_URL: http://shard2-a:8000
+    ports:
+      - "8021:8000"
+    volumes:
+      - shard2-a-data:/data
+
+  shard2-b:
+    <<: *replica
+    environment:
+      <<: *replica-env
+      SHARD_ID: shard-2
+      REPLICA_ID: shard-2-b
+      REPLICA_ROLE: follower
+      SHARD_URL: http://shard2-b:8000
+      LEADER_URL: http://shard2-a:8000
+    ports:
+      - "8022:8000"
+    volumes:
+      - shard2-b-data:/data
+
+  shard2-c:
+    <<: *replica
+    environment:
+      <<: *replica-env
+      SHARD_ID: shard-2
+      REPLICA_ID: shard-2-c
+      REPLICA_ROLE: follower
+      SHARD_URL: http://shard2-c:8000
+      LEADER_URL: http://shard2-a:8000
+    ports:
+      - "8023:8000"
+    volumes:
+      - shard2-c-data:/data
 
   coordinator-single:
     build:
@@ -48,6 +156,15 @@ services:
       - "8010:8000"
     networks:
       - kv-network
+
+volumes:
+  kafka-data:
+  shard1-a-data:
+  shard1-b-data:
+  shard1-c-data:
+  shard2-a-data:
+  shard2-b-data:
+  shard2-c-data:
 
 networks:
   kv-network:

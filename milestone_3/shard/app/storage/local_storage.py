@@ -10,17 +10,24 @@ class InMemoryShardStorage(ShardStorage):
 
     def __init__(self) -> None:
         self._records: dict[tuple[str, RecordKey], RecordValue] = {}
+        # Version of each record = offset of the log entry that last wrote it.
+        self._versions: dict[tuple[str, RecordKey], int | None] = {}
 
     def put(
         self,
         table_name: str,
         key: RecordKey,
         value: RecordValue,
+        version: int | None = None,
     ) -> bool:
         storage_key = (table_name, key)
         created = storage_key not in self._records
         self._records[storage_key] = deepcopy(value)
+        self._versions[storage_key] = version
         return created
+
+    def get_version(self, table_name: str, key: RecordKey) -> int | None:
+        return self._versions.get((table_name, key))
 
     def get(
         self,
@@ -36,7 +43,11 @@ class InMemoryShardStorage(ShardStorage):
         partition_key: str,
     ) -> list[dict[str, Any]]:
         records = [
-            {"sortKey": key.sort_key, "value": deepcopy(value)}
+            {
+                "sortKey": key.sort_key,
+                "value": deepcopy(value),
+                "version": self._versions.get((record_table, key)),
+            }
             for (record_table, key), value in self._records.items()
             if record_table == table_name and key.partition_key == partition_key
         ]
@@ -49,6 +60,7 @@ class InMemoryShardStorage(ShardStorage):
                 "partitionKey": key.partition_key,
                 "sortKey": key.sort_key,
                 "value": deepcopy(value),
+                "version": self._versions.get((table_name, key)),
             }
             for (table_name, key), value in self._records.items()
         ]
@@ -70,4 +82,5 @@ class InMemoryShardStorage(ShardStorage):
             return False
 
         del self._records[storage_key]
+        self._versions.pop(storage_key, None)
         return True

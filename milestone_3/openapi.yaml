@@ -6,8 +6,10 @@ info:
   description: >
     REST API for managing table definitions and key-value records
     in a distributed storage system. The coordinator exposes the API,
-    registers storage shards, and routes record operations to the
-    appropriate shard based on the record key.
+    registers storage shards and their replicas, and routes record
+    operations to the appropriate shard based on the record key. Each
+    shard is a replica set: a leader that accepts writes and followers
+    that replicate its log and serve reads.
 
 servers:
   - url: http://localhost:8000
@@ -20,6 +22,8 @@ tags:
     description: Key-value record operations
   - name: Shards
     description: Storage shard registration and discovery
+  - name: Health
+    description: Service health checks
 
 paths:
   /tables:
@@ -103,9 +107,11 @@ paths:
         Creates a record or replaces the existing record identified by
         its partition key and, when configured for the table, sort key.
         The coordinator determines the responsible shard and forwards
-        the write operation to that shard. The sortKey parameter must
+        the write operation to that shard's leader. The leader appends
+        the write to its replication log and answers once WRITE_QUORUM
+        replicas (itself included) hold it. The sortKey parameter must
         be provided when the table defines a sort key. The response
-        identifies the shard that accepted the write.
+        identifies the shard and the version (log offset) of the write.
       parameters:
         - $ref: '#/components/parameters/SortKey'
       requestBody:
@@ -136,7 +142,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '503':
-          description: No available shard can handle the request
+          description: >
+            No available shard can handle the request, or the write/read
+            quorum was not reached
           content:
             application/json:
               schema:
@@ -146,27 +154,38 @@ paths:
     get:
       tags:
         - Records
-      summary: Read all records in a partition
-      operationId: listRecordsByPartition
+      summary: Read one record by key or all records in a partition
+      operationId: readRecords
       description: >
-        Reads all records that share the partition key. The coordinator
-        identifies the responsible shard and retrieves the partition's
-        records from that shard. Each returned record includes its sortKey.
-        Returns an empty list when the table exists but the partition has
-        no records.
+        With sortKey, reads exactly one record identified by its full key
+        (partition key + sort key) and returns 404 when it does not exist.
+        Without sortKey, reads all records that share the partition key
+        and returns an empty list when the partition has no records.
+        In both cases the coordinator identifies the responsible shard by
+        the partition key, asks READ_QUORUM of its replicas (round-robin,
+        so reads are spread over all live replicas) and returns the answer
+        of the replica that has applied the most of the log. sortKey must
+        be omitted for tables without a sort key.
+      parameters:
+        - $ref: '#/components/parameters/SortKey'
       responses:
         '200':
-          description: Records in the partition
+          description: >
+            The record (when sortKey is given) or the records in the partition
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PartitionReadResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/RecordReadResponse'
+                  - $ref: '#/components/schemas/PartitionReadResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '503':
-          description: No available shard can handle the request
+          description: >
+            No available shard can handle the request, or the write/read
+            quorum was not reached
           content:
             application/json:
               schema:
@@ -191,7 +210,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '503':
-          description: No available shard can handle the request
+          description: >
+            No available shard can handle the request, or the write/read
+            quorum was not reached
           content:
             application/json:
               schema:
@@ -217,7 +238,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '503':
-          description: No available shard can handle the request
+          description: >
+            No available shard can handle the request, or the write/read
+            quorum was not reached
           content:
             application/json:
               schema:
@@ -230,9 +253,10 @@ paths:
       summary: Register a storage shard
       operationId: registerShard
       description: >
-        Registers a storage node with the coordinator.
-        Each shard registers its identifier and internal base URL
-        when it starts.
+        Registers one replica of a shard with the coordinator. Every
+        replica registers at startup with its shard, replica identifier,
+        role and internal base URL, and re-registers if the coordinator
+        forgets it (for example after a coordinator restart).
       requestBody:
         required: true
         content:
@@ -241,16 +265,20 @@ paths:
               $ref: '#/components/schemas/ShardRegistration'
             example:
               shardId: shard-1
-              baseUrl: http://shard-1:8001
+              replicaId: shard-1-b
+              role: follower
+              baseUrl: http://shard1-b:8000
       responses:
         '201':
-          description: Shard registered
+          description: Replica registered
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Shard'
+                $ref: '#/components/schemas/ShardRegistration'
         '409':
-          description: A shard with this identifier already exists
+          description: >
+            The replica is already registered, its identifier is taken by
+            another URL or role, or the shard already has a leader
           content:
             application/json:
               schema:
@@ -261,17 +289,34 @@ paths:
     get:
       tags:
         - Shards
-      summary: List registered shards
+      summary: List registered shards and their replicas
       operationId: listShards
       responses:
         '200':
-          description: Registered storage shards
+          description: Registered shards with their replica sets
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/Shard'
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Coordinator health check
+      operationId: health
+      description: >
+        Liveness check used by Docker Compose and deployment smoke tests.
+        Reports the routing mode and how many shards are registered.
+      responses:
+        '200':
+          description: Coordinator is running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
 
 components:
   parameters:
@@ -356,6 +401,12 @@ components:
           type: string
           nullable: true
           description: Shard that accepted the write, or null in single-node mode
+        version:
+          type: integer
+          nullable: true
+          description: >
+            Offset of the write in the shard's replication log; it orders all
+            writes in the shard. Null in single-node mode.
 
     PartitionRecord:
       type: object
@@ -370,6 +421,69 @@ components:
           type: object
           additionalProperties: true
           description: JSON object containing the record data
+        version:
+          type: integer
+          nullable: true
+          description: Log offset of the last write to this record
+
+    RecordReadResponse:
+      type: object
+      required:
+        - shardId
+        - sortKey
+        - value
+      properties:
+        shardId:
+          type: string
+          nullable: true
+          description: Shard that served the read, or null in single-node mode
+        replicaId:
+          type: string
+          nullable: true
+          description: Replica whose answer was returned (the freshest of the read quorum)
+        sortKey:
+          type: string
+          nullable: true
+          description: Sort key of the record
+        value:
+          type: object
+          additionalProperties: true
+          description: JSON object containing the record data
+        version:
+          type: integer
+          nullable: true
+          description: Log offset of the last write to this record
+
+    Health:
+      type: object
+      required:
+        - status
+        - shardingEnabled
+        - registeredShards
+      properties:
+        status:
+          type: string
+          example: ok
+        shardingEnabled:
+          type: boolean
+        registeredShards:
+          type: integer
+          description: Shards that have a registered leader
+        registeredReplicas:
+          type: integer
+          description: Replicas of all shards known to the coordinator
+        replicationFactor:
+          type: integer
+          description: N, replicas per shard
+        writeQuorum:
+          type: integer
+          description: W, replicas that must confirm a write
+        readQuorum:
+          type: integer
+          description: R, replicas asked on every read
+        strongConsistency:
+          type: boolean
+          description: True when R + W > N
 
     PartitionReadResponse:
       type: object
@@ -381,6 +495,10 @@ components:
           type: string
           nullable: true
           description: Shard that served the read, or null in single-node mode
+        replicaId:
+          type: string
+          nullable: true
+          description: Replica whose answer was returned
         records:
           type: array
           items:
@@ -396,23 +514,61 @@ components:
           type: string
           minLength: 1
           maxLength: 128
-          description: Unique identifier of the storage shard
+          description: Shard (replica set) the replica belongs to
+        replicaId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Unique replica identifier; defaults to shardId
+        role:
+          type: string
+          enum: [leader, follower]
+          default: leader
+          description: >
+            The leader accepts writes and owns the replication log; followers
+            replicate the log and serve reads. One leader per shard.
         baseUrl:
           type: string
           format: uri
           description: Internal base URL used by the coordinator
 
+    Replica:
+      type: object
+      required:
+        - replicaId
+        - baseUrl
+        - role
+        - available
+      properties:
+        replicaId:
+          type: string
+        baseUrl:
+          type: string
+          format: uri
+        role:
+          type: string
+          enum: [leader, follower]
+        available:
+          type: boolean
+          description: False for a while after a request to the replica failed
+
     Shard:
       type: object
       required:
         - shardId
-        - baseUrl
+        - replicas
       properties:
         shardId:
           type: string
         baseUrl:
           type: string
           format: uri
+          nullable: true
+          description: Leader URL, or null while no leader is registered
+        replicas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Replica'
 
     Error:
       type: object

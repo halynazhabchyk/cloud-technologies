@@ -59,6 +59,12 @@ class LocalStorage(Storage):
 
         return created
 
+    def get_record(self, table_name: str, key: RecordKey) -> RecordValue | None:
+        self.get_table(table_name)
+
+        value = self._records[table_name].get(key)
+        return deepcopy(value) if value is not None else None
+
     def list_records_by_partition(
         self,
         table_name: str,

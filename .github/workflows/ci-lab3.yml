@@ -1,0 +1,85 @@
+name: CI lab 3
+on:
+  push:
+    branches: [lab3-replication]
+    paths:
+      - "milestone_3/**"
+      - ".github/workflows/ci-lab3.yml"
+  pull_request:
+    paths:
+      - "milestone_3/**"
+      - ".github/workflows/ci-lab3.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint, test and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: milestone_3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            milestone_3/requirements-dev.txt
+            milestone_3/coordinator/requirements.txt
+            milestone_3/shard/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt -r shard/requirements.txt
+
+      - name: Lint
+        run: |
+          ruff check .
+          black --check .
+
+      - name: Tests
+        run: python -m pytest -q
+
+      - name: Compare hashing methods
+        run: python -m coordinator.app.sharding.measure_resharding --keys 10000
+
+      - name: Build Docker images
+        run: docker compose build
+
+      - name: Smoke test the cluster
+        run: |
+          set -eu
+          docker compose up -d
+          trap 'docker compose logs; docker compose down' EXIT
+          # 2 shards x 3 replicas must register with the coordinator.
+          for attempt in $(seq 1 30); do
+            replicas="$(curl -fsS http://localhost:8000/health | jq .registeredReplicas || echo 0)"
+            echo "[$attempt] registered replicas: $replicas"
+            [ "$replicas" = "6" ] && break
+            sleep 2
+          done
+          [ "$replicas" = "6" ]
+          curl -fsS -X POST http://localhost:8000/tables \
+            -H 'Content-Type: application/json' \
+            -d '{"tableName":"orders","partitionKey":"customerId","sortKey":"orderId"}'
+          # W = 2 by default: a 2xx means a follower already holds the write.
+          shard="$(curl -fsS -X PUT 'http://localhost:8000/tables/orders/items/c1?sortKey=o1' \
+            -H 'Content-Type: application/json' -d '{"value":{"total":10}}' | jq -r .shardId)"
+          for _ in 1 2 3; do
+            curl -fsS 'http://localhost:8000/tables/orders/items/c1?sortKey=o1' | jq -e '.value.total == 10'
+          done
+          # Followers catch up: every replica of the shard reports zero lag.
+          ports="$([ "$shard" = "shard-1" ] && echo '8011 8012 8013' || echo '8021 8022 8023')"
+          sleep 2
+          for port in $ports; do
+            curl -fsS "http://localhost:$port/health" | jq -e '.appliedOffset == 1'
+          done
