@@ -1,0 +1,28 @@
+# Prometheus pulls /metrics from every service every 5 seconds.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: coordinator
+    static_configs:
+      - targets: ["coordinator:8000"]
+
+  # Replicas are not listed here: the coordinator tells Prometheus which
+  # replicas are registered (HTTP service discovery), so shard-3 is scraped
+  # as soon as it joins, with shard / replica / role labels attached.
+  - job_name: replicas
+    http_sd_configs:
+      - url: http://coordinator:8000/internal/prometheus-targets
+        refresh_interval: 10s
+    # Replica metrics already carry shard/replica/role labels: keep them
+    # instead of renaming them to exported_shard etc.
+    honor_labels: true

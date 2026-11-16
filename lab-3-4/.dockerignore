@@ -1,0 +1,13 @@
+# The build context is the lab-3-4 folder (images need common/ next to their
+# code); only the service code goes into the images.
+.venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+tests/
+loadtest/
+monitoring/
+mcp_server/
+*.md

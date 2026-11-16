@@ -1,0 +1,46 @@
+# Alert rules. "for" is how long the condition must hold before the alert
+# fires: it filters out one slow request or one missed health check.
+groups:
+  - name: kv-store
+    rules:
+      - alert: ReplicaDown
+        # The coordinator's health checker sees the replica as down.
+        expr: kv_replica_up == 0
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Replica {{ $labels.replica }} of {{ $labels.shard }} is down"
+          description: "The coordinator health check of {{ $labels.replica }} ({{ $labels.role }}) has been failing for 10 s."
+
+      - alert: CoordinatorDown
+        expr: up{job="coordinator"} == 0
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "The coordinator is not reachable"
+          description: "Prometheus cannot scrape the coordinator: the whole store is unavailable."
+
+      - alert: HighP99Latency
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le, service) (rate(kv_request_duration_seconds_bucket[1m]))
+          ) > 0.5
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "p99 latency of {{ $labels.service }} is above 500 ms"
+          description: "p99 = {{ $value | humanizeDuration }} over the last minute."
+
+      - alert: ReplicationLagHigh
+        # Measured by the leader: age of the oldest entry the follower has
+        # not acknowledged.
+        expr: kv_replication_lag_seconds > 10
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Follower {{ $labels.follower }} lags more than 10 s behind its leader"
+          description: "Replication lag = {{ $value | humanizeDuration }}."

@@ -1,0 +1,285 @@
+x-build-args: &build-args
+  # Shown by GET /version: GIT_SHA=$(git rev-parse --short HEAD) docker compose build
+  GIT_SHA: ${GIT_SHA:-dev}
+  BUILD_TIME: ${BUILD_TIME:-unknown}
+
+x-replica: &replica
+  build:
+    context: .
+    dockerfile: shard/Dockerfile
+    args: *build-args
+  restart: unless-stopped
+  depends_on:
+    coordinator:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+  networks:
+    - kv-network
+
+x-replica-env: &replica-env
+  COORDINATOR_URL: http://coordinator:8000
+  DATA_DIR: /data
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS-kafka:9092}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+services:
+  kafka:
+    image: apache/kafka:3.8.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+    networks:
+      - kv-network
+
+  coordinator:
+    build:
+      context: .
+      dockerfile: coordinator/Dockerfile
+      args: *build-args
+    environment:
+      SHARDING_ENABLED: "true"
+      REPLICATION_FACTOR: ${REPLICATION_FACTOR:-3}
+      WRITE_QUORUM: ${WRITE_QUORUM:-2}
+      READ_QUORUM: ${READ_QUORUM:-2}
+      HEALTH_CHECK_SECONDS: ${HEALTH_CHECK_SECONDS:-5}
+      REBALANCE_DELAY_SECONDS: ${REBALANCE_DELAY_SECONDS:-5}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - kv-network
+
+  # ---- shard-1 ------------------------------------------------------------
+  shard1-a:
+    <<: *replica
+    environment:
+      <<: *replica-env
+      SHARD_ID: shard-1
+      REPLICA_ID: shard-1-a
+      REPLICA_ROLE: leader
+      SHARD_URL: http://shard1-a:8000
+    ports:
+      - "8011:8000"
+    volumes:
+      - shard1-a-data:/data
+
+  shard1-b:
+    <<: *replica
+    environment:
+      <<: *replica-env
+      SHARD_ID: shard-1
+      REPLICA_ID: shard-1-b
+      REPLICA_ROLE: follower
+      SHARD_URL: http://shard1-b:8000
+      LEADER_URL: http://shard1-a:8000
+    ports:
+      - "8012:8000"
+    volumes:
+      - shard1-b-data:/data
+
+  shard1-c:
+    <<: *replica
+    environment:
+      <<: *replica-env
+      SHARD_ID: shard-1
+      REPLICA_ID: shard-1-c
+      REPLICA_ROLE: follower
+      SHARD_URL: http://shard1-c:8000
+      LEADER_URL: http://shard1-a:8000
+    ports:
+      - "8013:8000"
+    volumes:
+      - shard1-c-data:/data
+
+  # ---- shard-2 ------------------------------------------------------------
+  shard2-a:
+    <<: *replica
+    environment:
+      <<: *replica-env
+      SHARD_ID: shard-2
+      REPLICA_ID: shard-2-a
+      REPLICA_ROLE: leader
+      SHARD_URL: http://shard2-a:8000
+    ports:
+      - "8021:8000"
+    volumes:
+      - shard2-a-data:/data
+
+  shard2-b:
+    <<: *replica
+    environment:
+      <<: *replica-env
+      SHARD_ID: shard-2
+      REPLICA_ID: shard-2-b
+      REPLICA_ROLE: follower
+      SHARD_URL: http://shard2-b:8000
+      LEADER_URL: http://shard2-a:8000
+    ports:
+      - "8022:8000"
+    volumes:
+      - shard2-b-data:/data
+
+  shard2-c:
+    <<: *replica
+    environment:
+      <<: *replica-env
+      SHARD_ID: shard-2
+      REPLICA_ID: shard-2-c
+      REPLICA_ROLE: follower
+      SHARD_URL: http://shard2-c:8000
+      LEADER_URL: http://shard2-a:8000
+    ports:
+      - "8023:8000"
+    volumes:
+      - shard2-c-data:/data
+
+  # ---- shard-3: added later to show rebalancing --------------------------
+  # docker compose --profile rebalance up -d
+  shard3-a:
+    <<: *replica
+    profiles: [rebalance]
+    environment:
+      <<: *replica-env
+      SHARD_ID: shard-3
+      REPLICA_ID: shard-3-a
+      REPLICA_ROLE: leader
+      SHARD_URL: http://shard3-a:8000
+    ports:
+      - "8031:8000"
+    volumes:
+      - shard3-a-data:/data
+
+  shard3-b:
+    <<: *replica
+    profiles: [rebalance]
+    environment:
+      <<: *replica-env
+      SHARD_ID: shard-3
+      REPLICA_ID: shard-3-b
+      REPLICA_ROLE: follower
+      SHARD_URL: http://shard3-b:8000
+      LEADER_URL: http://shard3-a:8000
+    ports:
+      - "8032:8000"
+    volumes:
+      - shard3-b-data:/data
+
+  shard3-c:
+    <<: *replica
+    profiles: [rebalance]
+    environment:
+      <<: *replica-env
+      SHARD_ID: shard-3
+      REPLICA_ID: shard-3-c
+      REPLICA_ROLE: follower
+      SHARD_URL: http://shard3-c:8000
+      LEADER_URL: http://shard3-a:8000
+    ports:
+      - "8033:8000"
+    volumes:
+      - shard3-c-data:/data
+
+  # ---- monitoring ---------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - coordinator
+      - alertmanager
+    networks:
+      - kv-network
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./monitoring/alertmanager:/etc/alertmanager:ro
+    ports:
+      - "9093:9093"
+    networks:
+      - kv-network
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      # The dashboard opens without logging in (read-only viewer).
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/kv-store.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - kv-network
+
+  coordinator-single:
+    build:
+      context: .
+      dockerfile: coordinator/Dockerfile
+      args: *build-args
+    profiles:
+      - single-node
+    environment:
+      SHARDING_ENABLED: "false"
+    ports:
+      - "8010:8000"
+    networks:
+      - kv-network
+
+volumes:
+  kafka-data:
+  shard1-a-data:
+  shard1-b-data:
+  shard1-c-data:
+  shard2-a-data:
+  shard2-b-data:
+  shard2-c-data:
+  shard3-a-data:
+  shard3-b-data:
+  shard3-c-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  kv-network:
+    driver: bridge

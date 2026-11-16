@@ -3,3 +3,9 @@ docs/
 desktop.ini
 __pycache__/
 .venv/
+
+# Project docs of lab 3-4 (ADRs, defense guide) are part of the code.
+!lab-3-4/docs/
+
+# Local MCP client config with absolute paths (see lab-3-4/docs/milestone-4.md).
+.mcp.json
