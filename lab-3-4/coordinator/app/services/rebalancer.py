@@ -6,12 +6,9 @@ from typing import Any
 
 from common.trace import new_trace_id, use_trace_id
 from coordinator.app.core.config import CoordinatorSettings
+from coordinator.app.services.errors import ShardUnavailableError
 from coordinator.app.services.metrics import REBALANCE_KEYS_MOVED
-from coordinator.app.services.shard_client import (
-    ShardClient,
-    ShardUnavailableError,
-    error_detail,
-)
+from coordinator.app.services.shard_client import ShardClient, error_detail
 from coordinator.app.sharding.consistent_hashing import ConsistentHashRing
 from coordinator.app.sharding.shard_registry import ShardRegistry
 from coordinator.app.storage.storage import RecordKey

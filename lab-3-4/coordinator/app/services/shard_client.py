@@ -8,6 +8,10 @@ import httpx
 
 from common.trace import trace_headers
 from coordinator.app.core.config import CoordinatorSettings
+from coordinator.app.services.errors import (
+    SHARD_UNAVAILABLE_DETAIL,
+    ShardUnavailableError,
+)
 from coordinator.app.services.metrics import SHARD_CALL_DURATION
 from coordinator.app.sharding.shard_registry import (
     NoAvailableShardsError,
@@ -17,17 +21,9 @@ from coordinator.app.storage.storage import RecordKey, RecordValue
 
 logger = logging.getLogger(__name__)
 
-SHARD_UNAVAILABLE_DETAIL = "No available shard can handle the request"
 # Contract with the replica API (see shard/app/api/routes/records.py).
 APPLIED_OFFSET_HEADER = "X-Applied-Offset"
 REPLICA_ID_HEADER = "X-Replica-Id"
-
-
-class ShardUnavailableError(RuntimeError):
-    """No replica could serve the request, or a replica answered incorrectly."""
-
-    def __init__(self, detail: str = SHARD_UNAVAILABLE_DETAIL):
-        super().__init__(detail)
 
 
 @dataclass(frozen=True)

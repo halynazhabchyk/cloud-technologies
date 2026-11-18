@@ -1,6 +1,4 @@
-from coordinator.app.services.shard_client import ShardUnavailableError
-
-__all__ = ["InvalidRequestError", "ShardUnavailableError", "WriteConflictError"]
+SHARD_UNAVAILABLE_DETAIL = "No available shard can handle the request"
 
 
 class InvalidRequestError(ValueError):
@@ -9,3 +7,10 @@ class InvalidRequestError(ValueError):
 
 class WriteConflictError(RuntimeError):
     """Last-Write-Wins rejected the write: a newer version is stored (HTTP 409)."""
+
+
+class ShardUnavailableError(RuntimeError):
+    """No replica could serve the request, or a replica answered incorrectly (503)."""
+
+    def __init__(self, detail: str = SHARD_UNAVAILABLE_DETAIL):
+        super().__init__(detail)

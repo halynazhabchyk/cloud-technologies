@@ -3,11 +3,14 @@ from typing import Any
 
 from common.clock import now_micros
 from coordinator.app.core.config import CoordinatorSettings
-from coordinator.app.services.errors import InvalidRequestError, WriteConflictError
+from coordinator.app.services.errors import (
+    InvalidRequestError,
+    ShardUnavailableError,
+    WriteConflictError,
+)
 from coordinator.app.services.rebalancer import Rebalancer
 from coordinator.app.services.shard_client import (
     ShardClient,
-    ShardUnavailableError,
     error_detail,
     read_json_object,
     read_records,
