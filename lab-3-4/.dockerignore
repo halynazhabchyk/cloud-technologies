@@ -9,5 +9,4 @@
 tests/
 loadtest/
 monitoring/
-mcp_server/
 *.md

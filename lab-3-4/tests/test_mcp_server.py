@@ -80,3 +80,17 @@ async def test_delete_tool_can_be_disabled(cluster) -> None:
         "kv_read",
     }
     assert tools["kv_read"].annotations.readOnlyHint is True
+
+
+def test_http_transport_settings_reach_fastmcp() -> None:
+    settings = McpSettings(transport="streamable-http", host="0.0.0.0", port=8100)
+    server = build_server(CoordinatorClient(None), settings)  # type: ignore[arg-type]
+
+    assert server.settings.host == "0.0.0.0"
+    assert server.settings.port == 8100
+    assert server.settings.streamable_http_path == "/mcp"
+
+
+def test_unknown_transport_is_rejected() -> None:
+    with pytest.raises(ValueError):
+        McpSettings(transport="websocket")  # type: ignore[arg-type]

@@ -223,7 +223,10 @@ curl -X PUT 'localhost:8000/tables/orders/items/lww?sortKey=o1' -H 'X-Write-Time
 
 ## MCP server (milestone 4)
 
-`mcp_server/` exposes the store to AI agents over the Model Context Protocol (official Python SDK, stdio transport). It is a client of the coordinator's public API.
+`mcp_server/` exposes the store to AI agents over the Model Context Protocol (official Python SDK). It is a client of the coordinator's public API. It supports two transports, chosen by `MCP_TRANSPORT`:
+
+- `streamable-http` (in Docker): a network server at `http://mcp:8100/mcp`, used by **n8n**;
+- `stdio` (local default): the client starts the process (Claude Code, MCP Inspector).
 
 | Tool | Operation |
 |------|-----------|
@@ -235,15 +238,21 @@ curl -X PUT 'localhost:8000/tables/orders/items/lww?sortKey=o1' -H 'X-Write-Time
 
 Table creation, shard registration and rebalancing are deliberately not exposed. Every tool call uses a trace ID `mcp-<uuid>`, returned to the agent and visible in the logs.
 
-Run it from this folder (the client starts the process):
+### With n8n (the client shown on the defense)
+
+```sh
+docker compose --profile agent up -d --build   # adds the mcp (:8100) and n8n (:5678) containers
+```
+
+In n8n (http://localhost:5678): a workflow *Chat Trigger → AI Agent* with a chat model (for example Google Gemini with a free AI Studio key) and an **MCP Client Tool** sub-node: endpoint `http://mcp:8100/mcp`, transport *HTTP Streamable*, no authentication. The agent then calls `kv_exists` / `kv_create` / `kv_read` / `kv_delete` from chat messages. The MCP port is published only on `127.0.0.1`, because the server has no authentication. Step-by-step setup: `docs/milestone-4.md`, section 2.7.
+
+### Locally over stdio
 
 ```sh
 pip install -r mcp_server/requirements.txt
 python -m mcp_server.server                     # COORDINATOR_URL defaults to http://127.0.0.1:8000
 npx @modelcontextprotocol/inspector python -m mcp_server.server   # browser UI for manual checks
 ```
-
-To use it from Claude Code, add a project `.mcp.json` (see `docs/milestone-4.md`).
 
 ## Rebalancing (milestone 4, extended)
 

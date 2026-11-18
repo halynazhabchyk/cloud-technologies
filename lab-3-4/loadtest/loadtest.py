@@ -119,7 +119,9 @@ def print_result(result: dict) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description="Closed-loop load test for the key-value store"
+    )
     parser.add_argument("--url", default="http://localhost:8000")
     parser.add_argument("--duration", type=float, default=30)
     parser.add_argument("--concurrency", type=int, default=16)

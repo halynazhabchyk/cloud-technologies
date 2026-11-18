@@ -252,7 +252,42 @@ services:
     networks:
       - kv-network
 
+  # ---- AI agent access: MCP server + n8n -----------------------------------
+  # docker compose --profile agent up -d
+  mcp:
+    build:
+      context: .
+      dockerfile: mcp_server/Dockerfile
+    profiles: [agent]
+    environment:
+      COORDINATOR_URL: http://coordinator:8000
+      MCP_ALLOW_DELETE: ${MCP_ALLOW_DELETE:-true}
+    ports:
+      - "127.0.0.1:8100:8100"
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    networks:
+      - kv-network
+
+  n8n:
+    image: n8nio/n8n:2.44.0
+    profiles: [agent]
+    environment:
+      GENERIC_TIMEZONE: Europe/Kyiv
+      TZ: Europe/Kyiv
+      N8N_DIAGNOSTICS_ENABLED: "false"
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n-data:/home/node/.n8n
+    depends_on:
+      - mcp
+    networks:
+      - kv-network
+
   coordinator-single:
+
     build:
       context: .
       dockerfile: coordinator/Dockerfile
@@ -279,6 +314,7 @@ volumes:
   shard3-c-data:
   prometheus-data:
   grafana-data:
+  n8n-data:
 
 networks:
   kv-network:
