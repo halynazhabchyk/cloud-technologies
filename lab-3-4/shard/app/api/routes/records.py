@@ -18,11 +18,9 @@ from app.replication.node import (
     WriteResult,
 )
 from app.storage import RecordKey
+from common.replica_headers import APPLIED_OFFSET_HEADER, REPLICA_ID_HEADER
 
 router = APIRouter(tags=["Records"])
-
-APPLIED_OFFSET_HEADER = "X-Applied-Offset"
-REPLICA_ID_HEADER = "X-Replica-Id"
 
 Acks = Query(
     default=1,

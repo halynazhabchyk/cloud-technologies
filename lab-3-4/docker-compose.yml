@@ -62,7 +62,11 @@ services:
       READ_QUORUM: ${READ_QUORUM:-2}
       HEALTH_CHECK_SECONDS: ${HEALTH_CHECK_SECONDS:-5}
       REBALANCE_DELAY_SECONDS: ${REBALANCE_DELAY_SECONDS:-5}
+      # Table definitions survive a restart (records are restored by the shards).
+      TABLES_FILE: /data/tables.json
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - coordinator-data:/data
     ports:
       - "8000:8000"
     healthcheck:
@@ -302,6 +306,7 @@ services:
       - kv-network
 
 volumes:
+  coordinator-data:
   kafka-data:
   shard1-a-data:
   shard1-b-data:

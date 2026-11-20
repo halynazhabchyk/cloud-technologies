@@ -77,6 +77,7 @@ def build_server(client: CoordinatorClient, settings: McpSettings) -> FastMCP:
 
     @mcp.tool(annotations=READ_ONLY)
     def kv_read(table: str, partition_key: str, sort_key: str = NO_SORT_KEY) -> dict:
+        """READ: one record by its full key; without sort_key, the whole partition."""
         return _call(client.read, table, partition_key, _sort_key(sort_key))
 
     if settings.allow_delete:

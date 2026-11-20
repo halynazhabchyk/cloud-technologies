@@ -22,7 +22,8 @@ SERVICE_NAME = "coordinator"
 def create_app(settings: CoordinatorSettings | None = None) -> FastAPI:
     settings = settings or load_settings()
     configure_logging(SERVICE_NAME)
-    coordinator = Coordinator(LocalStorage(), ShardRegistry(), settings)
+    storage = LocalStorage(settings.tables_file)
+    coordinator = Coordinator(storage, ShardRegistry(), settings)
     health_checker = ReplicaHealthChecker(coordinator.shard_registry, settings)
 
     @asynccontextmanager

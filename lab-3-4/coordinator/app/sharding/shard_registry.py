@@ -166,20 +166,16 @@ class ShardRegistry:
                 ring.add_node(routable_id)
         return ring
 
-    def select_shard(
+    def select_leader(
         self, partition_key: str, shard_id: str | None = None
-    ) -> dict[str, str]:
-        """Shard owning the key (or ``shard_id``) and its leader URL."""
+    ) -> tuple[str, Replica]:
+        """Shard owning the key (or the given ``shard_id``) and its leader."""
         with self._lock:
             shard_id = shard_id or self.owner(partition_key)
             leader = self._leader(self._shards.get(shard_id, {}))
             if leader is None:
                 raise NoAvailableShardsError(f"Shard '{shard_id}' has no leader")
-            return {
-                "shardId": shard_id,
-                "baseUrl": leader.base_url,
-                "replicaId": leader.replica_id,
-            }
+            return shard_id, leader
 
     def select_read_replicas(
         self, partition_key: str, shard_id: str | None = None

@@ -55,6 +55,26 @@ def _entry_version(entry: LogEntry) -> Version:
     return Version(entry.get("timestamp", 0), entry["offset"])
 
 
+def _log_operation(
+    op: str,
+    table: str,
+    key: RecordKey,
+    timestamp: int,
+    value: RecordValue | None = None,
+) -> dict[str, Any]:
+    """A write as it goes to the replication log (Kafka adds the offset)."""
+    operation: dict[str, Any] = {
+        "op": op,
+        "table": table,
+        "partitionKey": key.partition_key,
+        "sortKey": key.sort_key,
+        "timestamp": timestamp,
+    }
+    if op == PUT:
+        operation["value"] = value
+    return operation
+
+
 class ReplicaNode:
     """Applies log entries to the in-memory store in strict offset order."""
 
@@ -135,6 +155,10 @@ class ReplicaNode:
 
     # --- leader -----------------------------------------------------------
 
+    def _require_leader(self) -> None:
+        if not self.is_leader:
+            raise NotLeaderError("This replica is a read-only follower")
+
     def _check_last_write_wins(
         self, table: str, key: RecordKey, timestamp: int
     ) -> None:
@@ -166,20 +190,10 @@ class ReplicaNode:
         """Write a record; ``timestamp`` comes from the coordinator (LWW)."""
         timestamp = timestamp or now_micros()
         with self.lock:
-            if not self.is_leader:
-                raise NotLeaderError("This replica is a read-only follower")
+            self._require_leader()
             self._check_last_write_wins(table, key, timestamp)
             created = not self.storage.exists(table, key)
-            version = self._write(
-                {
-                    "op": PUT,
-                    "table": table,
-                    "partitionKey": key.partition_key,
-                    "sortKey": key.sort_key,
-                    "value": value,
-                    "timestamp": timestamp,
-                }
-            )
+            version = self._write(_log_operation(PUT, table, key, timestamp, value))
             return WriteResult(created, version)
 
     def delete(
@@ -188,21 +202,12 @@ class ReplicaNode:
         """Delete a record (leave a tombstone); None when it is missing."""
         timestamp = timestamp or now_micros()
         with self.lock:
-            if not self.is_leader:
-                raise NotLeaderError("This replica is a read-only follower")
+            self._require_leader()
             if not self.storage.exists(table, key):
                 return None
             self._check_last_write_wins(table, key, timestamp)
-            version = self._write(
-                {
-                    "op": DELETE,
-                    "table": table,
-                    "partitionKey": key.partition_key,
-                    "sortKey": key.sort_key,
-                    "timestamp": timestamp,
-                }
-            )
-            return WriteResult(False, version)
+            version = self._write(_log_operation(DELETE, table, key, timestamp))
+            return WriteResult(created=False, version=version)
 
     def wait_for_write_quorum(self, offset: int, acks: int) -> bool:
         """Wait until ``acks`` replicas (the leader included) hold ``offset``."""

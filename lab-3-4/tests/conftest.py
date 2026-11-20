@@ -88,7 +88,8 @@ class ShardedCluster:
         keys: dict[str, str] = {}
         for index in range(1_000):
             key = f"partition-{index}"
-            keys.setdefault(registry.select_shard(key)["shardId"], key)
+            shard_id, _leader = registry.select_leader(key)
+            keys.setdefault(shard_id, key)
             if len(keys) == len(SHARD_IDS):
                 return keys
         raise AssertionError("Sample keys did not cover every shard")

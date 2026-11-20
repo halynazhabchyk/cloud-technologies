@@ -107,29 +107,39 @@ class KafkaLeaderLog:
                 "enable.auto.commit": False,
             }
         )
+        deadline = time.monotonic() + timeout
         try:
-            partition = TopicPartition(self.topic, PARTITION)
-            deadline = time.monotonic() + timeout
-            while True:
-                try:
-                    # A freshly created topic needs a moment to show up in metadata.
-                    _, high = consumer.get_watermark_offsets(partition, timeout=5)
-                    break
-                except KafkaException:
-                    if time.monotonic() > deadline:
-                        raise
-                    time.sleep(1)
+            message_count = self._message_count(consumer, deadline)
             consumer.assign([TopicPartition(self.topic, PARTITION, 0)])
-            entries: list[LogEntry] = []
-            while len(entries) < high:
-                if time.monotonic() > deadline:
-                    raise LogWriteError("Timed out reading the Kafka log")
-                message = consumer.poll(1.0)
-                if message is None:
-                    continue
-                if message.error():
-                    raise KafkaException(message.error())
-                entries.append(to_entry(message))
-            return entries
+            return self._read_messages(consumer, message_count, deadline)
         finally:
             consumer.close()
+
+    def _message_count(self, consumer: Consumer, deadline: float) -> int:
+        """Number of messages in the topic (its high watermark)."""
+        partition = TopicPartition(self.topic, PARTITION)
+        while True:
+            try:
+                _, high = consumer.get_watermark_offsets(partition, timeout=5)
+                return high
+            except KafkaException:
+                # A freshly created topic needs a moment to show up in metadata.
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(1)
+
+    @staticmethod
+    def _read_messages(
+        consumer: Consumer, message_count: int, deadline: float
+    ) -> list[LogEntry]:
+        entries: list[LogEntry] = []
+        while len(entries) < message_count:
+            if time.monotonic() > deadline:
+                raise LogWriteError("Timed out reading the Kafka log")
+            message = consumer.poll(1.0)
+            if message is None:
+                continue
+            if message.error():
+                raise KafkaException(message.error())
+            entries.append(to_entry(message))
+        return entries

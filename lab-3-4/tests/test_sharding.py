@@ -49,16 +49,17 @@ def test_registry_requires_two_shards_and_routes_after_registration() -> None:
 
     registry.register("shard-1", "http://shard-1:8000/")
     try:
-        registry.select_shard("partition-1")
+        registry.select_leader("partition-1")
     except NoAvailableShardsError:
         pass
     else:
         raise AssertionError("A single shard must not accept routed requests")
 
     registry.register("shard-2", "http://shard-2:8000")
-    selected = registry.select_shard("partition-1")
+    shard_id, leader = registry.select_leader("partition-1")
 
-    assert selected["shardId"] in {"shard-1", "shard-2"}
+    assert shard_id in {"shard-1", "shard-2"}
+    assert leader.base_url == f"http://{shard_id}:8000"
 
 
 def test_coordinator_rejects_malformed_shard_response(

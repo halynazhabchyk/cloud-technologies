@@ -1,5 +1,3 @@
-# Alert rules. "for" is how long the condition must hold before the alert
-# fires: it filters out one slow request or one missed health check.
 groups:
   - name: kv-store
     rules:

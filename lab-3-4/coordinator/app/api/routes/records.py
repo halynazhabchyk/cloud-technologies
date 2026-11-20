@@ -20,7 +20,9 @@ router = APIRouter(
 RECORD_EXAMPLE: dict[str, Example] = {
     "user": {
         "summary": "Приклад запису користувача",
-        "value": {"name": "Alex", "email": "alex@example.com"},
+        # OpenAPI "value" is the whole request body, so the record goes inside
+        # the API's own "value" field.
+        "value": {"value": {"name": "Alex", "email": "alex@example.com"}},
     },
 }
 

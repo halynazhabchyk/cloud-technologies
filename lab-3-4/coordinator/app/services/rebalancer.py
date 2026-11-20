@@ -8,7 +8,8 @@ from common.trace import new_trace_id, use_trace_id
 from coordinator.app.core.config import CoordinatorSettings
 from coordinator.app.services.errors import ShardUnavailableError
 from coordinator.app.services.metrics import REBALANCE_KEYS_MOVED
-from coordinator.app.services.shard_client import ShardClient, error_detail
+from coordinator.app.services.shard_client import ShardClient
+from coordinator.app.services.shard_responses import error_detail
 from coordinator.app.sharding.consistent_hashing import ConsistentHashRing
 from coordinator.app.sharding.shard_registry import ShardRegistry
 from coordinator.app.storage.storage import RecordKey
@@ -110,13 +111,13 @@ class Rebalancer:
         key = RecordKey(record["partitionKey"], record.get("sortKey"))
         timestamp = record.get("timestamp")
         try:
-            copied = self.shards.write(
-                "PUT", table, key, record["value"], timestamp=timestamp, shard_id=target
+            copied = self.shards.put_record(
+                table, key, record["value"], timestamp=timestamp, shard_id=target
             ).response
             if copied.status_code not in COPY_OK:
                 raise ShardUnavailableError(error_detail(copied))
-            deleted = self.shards.write(
-                "DELETE", table, key, timestamp=timestamp, shard_id=source
+            deleted = self.shards.delete_record(
+                table, key, timestamp=timestamp, shard_id=source
             ).response
             if deleted.status_code not in DELETE_OK:
                 raise ShardUnavailableError(error_detail(deleted))

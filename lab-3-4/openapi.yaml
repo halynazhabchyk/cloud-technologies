@@ -756,7 +756,7 @@ components:
           example: 4.0.0
         gitSha:
           type: string
-          example: e4ed66c
+          example: 92c00e7
         buildTime:
           type: string
           example: "2026-11-11T08:00:00Z"

@@ -1,4 +1,5 @@
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from coordinator.app.storage.storage import (
@@ -7,14 +8,27 @@ from coordinator.app.storage.storage import (
     Storage,
     TableAlreadyExistsError,
 )
+from coordinator.app.storage.table_catalog_file import (
+    load_table_definitions,
+    save_table_definitions,
+)
 
 
 class LocalStorage(Storage):
-    """In-memory implementation used when coordinator sharding is disabled."""
+    """Table definitions plus in-memory records for the single-node mode.
 
-    def __init__(self) -> None:
-        self._tables: dict[str, dict[str, Any]] = {}
-        self._records: dict[str, dict[RecordKey, RecordValue]] = {}
+    With ``tables_file`` the table definitions survive a coordinator restart;
+    without it (tests, single-node demo) everything stays in memory.
+    """
+
+    def __init__(self, tables_file: Path | None = None) -> None:
+        self._tables_file = tables_file
+        self._tables: dict[str, dict[str, Any]] = (
+            load_table_definitions(tables_file) if tables_file else {}
+        )
+        self._records: dict[str, dict[RecordKey, RecordValue]] = {
+            table_name: {} for table_name in self._tables
+        }
 
     def create_table(
         self,
@@ -33,6 +47,8 @@ class LocalStorage(Storage):
 
         self._tables[table_name] = table
         self._records[table_name] = {}
+        if self._tables_file:
+            save_table_definitions(self._tables_file, self._tables)
 
         return deepcopy(table)
 

@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 
 def _env_bool(name: str, default: str = "false") -> bool:
@@ -22,6 +23,8 @@ class CoordinatorSettings:
     # Background rebalancing when a new shard joins the ring.
     rebalance_enabled: bool = True
     rebalance_delay_seconds: float = 5.0
+    # JSON file with table definitions; None keeps them only in memory.
+    tables_file: Path | None = None
 
     def __post_init__(self) -> None:
         for name, quorum in (
@@ -44,4 +47,7 @@ def load_settings() -> CoordinatorSettings:
         health_check_timeout=float(os.getenv("HEALTH_CHECK_TIMEOUT", "1")),
         rebalance_enabled=_env_bool("REBALANCE_ENABLED", "true"),
         rebalance_delay_seconds=float(os.getenv("REBALANCE_DELAY_SECONDS", "5")),
+        tables_file=(
+            Path(os.environ["TABLES_FILE"]) if os.getenv("TABLES_FILE") else None
+        ),
     )

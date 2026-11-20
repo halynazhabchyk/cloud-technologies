@@ -1,6 +1,4 @@
-# Alertmanager groups alerts and sends notifications. The demo receiver has
 # no integration: active alerts are shown in the UI (http://localhost:9093).
-# A real setup would add e.g. telegram_configs or slack_configs here.
 route:
   receiver: default
   group_by: [alertname]
